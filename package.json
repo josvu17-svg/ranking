@@ -1,0 +1,52 @@
+{
+  "name": "ranking",
+  "productName": "Ranking",
+  "version": "1.0.0",
+  "description": "Tournament ranking for village volleyball tournaments",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "vite build && electron .",
+    "test": "node --test tests/engine.test.js tests/ai.test.cjs",
+    "dist": "vite build && electron-builder",
+    "dist:win": "vite build && electron-builder --win dir",
+    "dist:mac": "vite build && electron-builder --mac"
+  },
+  "build": {
+    "appId": "vn.hoilang.ranking",
+    "productName": "Ranking",
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "directories": {
+      "output": "release"
+    }
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "vite": "^5.4.21"
+  },
+  "dependencies": {
+    "@fontsource/montserrat": "^5.3.0",
+    "html-to-image": "^1.11.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "author": "Ranking"
+}
