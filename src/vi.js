@@ -299,5 +299,16 @@ export const VI = {
   'Done': 'Xong',
   'vs': 'gặp',
   'Clear date and time': 'Xóa ngày giờ',
+  'Print': 'In',
+  'Save image / Print': 'Lưu ảnh / In',
+  'Undo': 'Hoàn tác',
+  'Redo': 'Làm lại',
+  'Back up': 'Sao lưu',
+  'Restore': 'Khôi phục',
+  'Saves your teams, formats and tournament to a file.': 'Lưu danh sách đội, thể thức và giải đấu vào một file.',
+  'Opens a backup file and restores it on this device.': 'Mở file sao lưu và khôi phục dữ liệu trên thiết bị này.',
+  'Replace everything on this device with this backup?': 'Thay thế toàn bộ dữ liệu trên thiết bị này bằng bản sao lưu?',
+  'This is not a Ranking backup file.': 'Đây không phải file sao lưu của Ranking.',
+  'Backup restored.': 'Đã khôi phục dữ liệu.',
   'Back to formats': 'Về danh sách thể thức'
 };

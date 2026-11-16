@@ -45,11 +45,11 @@ const nameOf = (names, team, label) => (team == null ? label : names[team]);
 
 // ---------- sheets (what ends up in the picture) ----------
 
-function SheetFrame({ title, sub, sport, width, children }) {
+function SheetFrame({ title, sub, sport, width, compact, children }) {
   return (
     <div style={{ display: 'inline-block', minWidth: width || 0, boxSizing: 'border-box', padding: '28px 32px 30px', background: '#FFFFFF', color: NAVY, fontFamily: "'Montserrat', system-ui, sans-serif" }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-        <h1 style={{ margin: 0, fontSize: 38, lineHeight: '46px', fontStyle: 'italic', fontWeight: 800, letterSpacing: -0.5 }}>{title}</h1>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: compact ? 10 : 14, marginBottom: compact ? 14 : 20 }}>
+        <h1 style={{ margin: 0, fontSize: compact ? 28 : 38, lineHeight: compact ? '36px' : '46px', fontStyle: 'italic', fontWeight: 800, letterSpacing: -0.5 }}>{title}</h1>
         {sub ? <span style={{ height: 36, boxSizing: 'border-box', padding: '0 16px', display: 'flex', alignItems: 'center', border: '1.5px solid ' + NAVY, borderRadius: 18, fontSize: 15, fontWeight: 700 }}>{sub}</span> : null}
         <SportPill sport={sport} />
       </div>
@@ -75,17 +75,17 @@ const datesOf = (items, schedule) => {
 };
 const shortDate = (iso) => { const p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); return p ? p[3] + '/' + p[2] : ''; };
 
-function ScheduleSheet({ list, names, schedule, sport, title, sub }) {
+function ScheduleSheet({ list, names, schedule, sport, title, sub, print }) {
   const sc = (x) => schedule[x.m.key] || {};
   const cell = { minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' };
   return (
-    <SheetFrame title={t('Match schedule')} sub={sub || title} sport={sport} width={940}>
+    <SheetFrame title={t('Match schedule')} sub={sub || title} sport={sport} width={print ? 700 : 940} compact={print}>
       {sections(list).map((g, gi) => {
         const ds = datesOf(g.items, schedule);
         const one = ds.length === 1 && ds[0] ? ds[0] : '';
         const mixed = ds.filter((d) => d).length > 0 && !one;
         return (
-          <div key={gi} style={{ marginTop: gi ? 16 : 0, border: '1px solid #CBDCF7', borderRadius: 14, overflow: 'hidden', background: '#FFFFFF' }}>
+          <div key={gi} style={{ marginTop: gi ? 16 : 0, border: '1px solid #CBDCF7', borderRadius: 14, overflow: 'hidden', background: '#FFFFFF', breakInside: 'avoid', pageBreakInside: 'avoid' }}>
             <div style={{ height: 40, boxSizing: 'border-box', padding: '0 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: NAVY, color: '#FFFFFF', fontSize: 13, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase' }}>
               <span>{g.label}</span>
               {one ? <span style={{ height: 26, boxSizing: 'border-box', padding: '0 12px', display: 'flex', alignItems: 'center', background: '#FFFFFF', color: NAVY, borderRadius: 13, fontSize: 12, letterSpacing: 0.3 }}>{fmtDate(one)}</span> : null}
@@ -119,8 +119,8 @@ function ScheduleSheet({ list, names, schedule, sport, title, sub }) {
 }
 
 // kind: 'bracket' | 'standings' | 'schedule'
-function Sheet({ kind, b, names, sport, title, schedule, bracketProps }) {
-  if (kind === 'schedule') return <ScheduleSheet list={listMatches(b.columns)} names={names} schedule={schedule || {}} sport={sport} title={title} />;
+function Sheet({ kind, b, names, sport, title, schedule, bracketProps, print }) {
+  if (kind === 'schedule') return <ScheduleSheet list={listMatches(b.columns)} names={names} schedule={schedule || {}} sport={sport} title={title} print={print} />;
   if (kind === 'standings') {
     const one = b.tables.length === 1;
     return (
@@ -169,6 +169,41 @@ export function ExportRunner(props) {
   );
 }
 
+// Prints the sheet on A4: wide sheets are shrunk to one landscape page, the schedule runs over portrait pages.
+export function PrintRunner(props) {
+  const { kind, onDone } = props;
+  const ref = useRef(null);
+  const [scale, setScale] = useState(1);
+  const [size, setSize] = useState(null);
+  const landscape = kind !== 'schedule';
+  useEffect(() => {
+    let dead = false;
+    const after = () => { if (!dead) onDone(); };
+    window.addEventListener('afterprint', after);
+    const t1 = setTimeout(() => {
+      const el = ref.current;
+      if (!el) return;
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      const s = landscape && w > 0 && h > 0 ? Math.min(1, 1040 / w, 700 / h) : 1;
+      setScale(s);
+      setSize({ w: w * s, h: h * s });
+      setTimeout(() => { if (!dead) window.print(); }, 250);
+    }, 450);
+    const t2 = setTimeout(after, 180000);
+    return () => { dead = true; clearTimeout(t1); clearTimeout(t2); window.removeEventListener('afterprint', after); };
+  }, []);
+  return createPortal(
+    <div id="print-root">
+      <style>{'@media print { @page { size: A4 ' + (landscape ? 'landscape' : 'portrait') + '; margin: 10mm; } }'}</style>
+      <div style={landscape && size ? { width: size.w, height: size.h, overflow: 'hidden' } : undefined}>
+        <div ref={ref} style={{ display: 'inline-block', transform: 'scale(' + scale + ')', transformOrigin: 'top left' }}><Sheet {...props} print /></div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 // ---------- dialogs ----------
 
 const closeBtn = (onClose) => (
@@ -205,7 +240,7 @@ export function ImagePreview({ url, name, onSave, onClose }) {
 const inp = { boxSizing: 'border-box', height: 40, padding: '0 10px', background: '#FFFFFF', border: '1.5px solid #BFD3F5', borderRadius: 12, fontSize: 14, fontWeight: 700, color: NAVY, minWidth: 0 };
 const lab = { fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: '#3F5688' };
 
-export function ScheduleModal({ list, names, schedule, onChange, onSaveImage, onClose }) {
+export function ScheduleModal({ list, names, schedule, onChange, onSaveImage, onPrint, onClose }) {
   const [start, setStart] = useState(todayIso());
   const [first, setFirst] = useState('08:00');
   const [gap, setGap] = useState('45');
@@ -289,6 +324,7 @@ export function ScheduleModal({ list, names, schedule, onChange, onSaveImage, on
         </div>
         <div style={{ flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
           <button type="button" className="ghost" onClick={onSaveImage} style={{ height: 52 }}>{t('Save image')}</button>
+          <button type="button" className="ghost" onClick={onPrint} style={{ height: 52 }}>{t('Print')}</button>
           <button type="button" className="primary" onClick={onClose} style={{ height: 52, padding: '0 28px' }}>{t('Done')}</button>
         </div>
       </div>

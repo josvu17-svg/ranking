@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Stage, Header, SportPill, Bracket, ScoreModal, ArrowRight, Sparkle, VolleyballIcon, FootballIcon, NAVY } from './ui.jsx';
 import { buildGroups, buildPlan, buildSwiss, knockoutFromSeeds, swissAllowed, formatStats, LETTERS } from './engine.js';
 import { swissColumns, swissPreviewColumns, groupsColumns, singleColumns, planColumns } from './adapters.js';
@@ -6,7 +6,9 @@ import { swissHtml } from './staticPages.js';
 import { normalizeSpec } from './aiSpec.js';
 import { t as tr, aiLanguage } from './i18n.js';
 import { useLang } from './lang.jsx';
-import { ScheduleModal, ExportRunner, ImagePreview, listMatches } from './schedule.jsx';
+import { ScheduleModal, ExportRunner, PrintRunner, ImagePreview, listMatches } from './schedule.jsx';
+import { makeBackup, parseBackup } from './backup.js';
+import { saveBlob, pickText } from './files.js';
 
 const SAMPLES = ['Thôn Đông', 'Thôn Tây', 'Thôn Nam', 'Thôn Bắc', 'Xóm Chùa', 'Xóm Chợ', 'Xóm Đình', 'Xóm Giữa', 'Làng Hạ', 'Làng Thượng', 'Làng Trung', 'Làng Mới', 'Cầu Đất', 'Đồng Xuân', 'Gò Cát', 'Bãi Sậy'];
 export const KEY = 'ranking.v1';
@@ -25,22 +27,27 @@ const identity = () => {
 
 const DEFAULT = { customs: [], sorder: null, sport: 'volleyball', bo: 5, raw: '8', names: SAMPLES.slice(), sel: 'swiss', G: 2, per: 4, order: identity(), tournament: null };
 
+// Brings saved data (from this device or from a backup file) into the shape the app expects.
+function normalize(raw) {
+  const d = Object.assign({}, DEFAULT, raw);
+  // Older saves kept one AI format in plan / planName: move it into the list.
+  if (d.plan && !(d.customs || []).length) {
+    d.customs = [{ id: 'old', name: d.planName || 'Custom', plan: d.plan }];
+    if (d.sel === 'plan') d.sel = 'c:old';
+  }
+  if (d.sel === 'plan') d.sel = 'groups';
+  delete d.plan;
+  delete d.planName;
+  if (!Array.isArray(d.customs)) d.customs = [];
+  if (!Array.isArray(d.names)) d.names = SAMPLES.slice();
+  if (!Array.isArray(d.order) || d.order.length !== ORDER_LEN) d.order = identity();
+  return d;
+}
+
 export function load() {
   try {
     const s = JSON.parse(window.localStorage.getItem(KEY));
-    if (s && s.v === 1) {
-      const d = Object.assign({}, DEFAULT, s.data);
-      // Older saves kept one AI format in plan / planName: move it into the list.
-      if (d.plan && !(d.customs || []).length) {
-        d.customs = [{ id: 'old', name: d.planName || 'Custom', plan: d.plan }];
-        if (d.sel === 'plan') d.sel = 'c:old';
-      }
-      if (d.sel === 'plan') d.sel = 'groups';
-      delete d.plan;
-      delete d.planName;
-      if (!Array.isArray(d.customs)) d.customs = [];
-      return d;
-    }
+    if (s && s.v === 1) return normalize(s.data);
   } catch (e) { /* ignore */ }
   return DEFAULT;
 }
@@ -361,8 +368,24 @@ export default function App() {
     if (a) { e.preventDefault(); go(a.getAttribute('data-nav')); }
   };
 
+  const backup = () => { const f = makeBackup(data); saveBlob(new Blob([f.text], { type: 'application/json' }), f.name); };
+  const restore = () => pickText('.json,application/json', (text) => {
+    const raw = parseBackup(text);
+    let nd = null;
+    if (raw) {
+      try {
+        nd = normalize(raw);
+        if (nd.tournament) buildAll(nd.tournament);
+      } catch (e) { nd = null; }
+    }
+    if (!nd) { window.alert(tr('This is not a Ranking backup file.')); return; }
+    if (!window.confirm(tr('Replace everything on this device with this backup?'))) return;
+    setData(nd);
+    window.alert(tr('Backup restored.'));
+  });
+
   let body;
-  if (screen === 'landing') body = <Landing sport={data.sport} setSport={(v) => patch({ sport: v })} hasSaved={!!data.tournament} onContinue={() => go('teams')} onResume={() => go('tournament')} />;
+  if (screen === 'landing') body = <Landing sport={data.sport} setSport={(v) => patch({ sport: v })} hasSaved={!!data.tournament} onContinue={() => go('teams')} onResume={() => go('tournament')} onBackup={backup} onRestore={restore} />;
   else if (screen === 'teams') body = <Teams sport={data.sport} data={data} n={n} patch={patch} go={go} />;
   else if (screen === 'formats') body = <Formats sport={data.sport} data={data} n={n} names={names} patch={patch} go={go} />;
   else if (screen === 'explain') body = <div onClick={onNav} dangerouslySetInnerHTML={{ __html: translateHtml(swissHtml) }} />;
@@ -382,7 +405,7 @@ function translateHtml(html) {
 
 // ---------- landing ----------
 
-function Landing({ onContinue, onResume, hasSaved, sport, setSport }) {
+function Landing({ onContinue, onResume, hasSaved, sport, setSport, onBackup, onRestore }) {
   const [open, setOpen] = useState(false);
   const label = sport === 'football' ? tr('Football') : tr('Volleyball');
   return (
@@ -413,6 +436,10 @@ function Landing({ onContinue, onResume, hasSaved, sport, setSport }) {
             {hasSaved ? (
               <button type="button" onClick={onResume} style={{ height: 60, background: '#FFFFFF', border: '2px solid ' + NAVY, borderRadius: 24, fontSize: 20, fontWeight: 700, color: NAVY, cursor: 'pointer' }}>{tr('Resume saved tournament')}</button>
             ) : null}
+            <div style={{ marginTop: 6, display: 'flex', justifyContent: 'center', gap: 10 }}>
+              <button type="button" className="ghost soft" onClick={onBackup} title={tr('Saves your teams, formats and tournament to a file.')}>{tr('Back up')}</button>
+              <button type="button" className="ghost soft" onClick={onRestore} title={tr('Opens a backup file and restores it on this device.')}>{tr('Restore')}</button>
+            </div>
           </>
       </div>
     </div>
@@ -807,11 +834,19 @@ function Tournament({ data, patch, go }) {
   const [menu, setMenu] = useState(false);
   const [exp, setExp] = useState(null);
   const [img, setImg] = useState(null);
+  const [prn, setPrn] = useState(null);
+  const hist = useRef({ past: [], future: [] });
+  const kb = useRef(null);
   const b = useMemo(() => (t ? buildAll(t) : null), [t, lang]);
   useEffect(() => {
     window.__rankingClose = open ? () => setOpen(null) : sched ? () => setSched(false) : img ? () => setImg(null) : null;
     return () => { window.__rankingClose = null; };
   }, [open, sched, img]);
+  useEffect(() => {
+    const h = (e) => { if (kb.current) kb.current(e); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
   if (!t) {
     return (
       <>
@@ -823,7 +858,40 @@ function Tournament({ data, patch, go }) {
   const tnames = shownNames(t);
   const koLike = t.format === 'single' || (t.format === 'plan' && t.cfg.plan.stage === 'knockout');
   const played = b.matches.filter((m) => m.result).length;
-  const setResults = (results) => patch({ tournament: prune(Object.assign({}, t, { results: results })) });
+  // Every change to the results can be undone and redone (the schedule is not part of it).
+  const setResults = (results) => {
+    const next = prune(Object.assign({}, t, { results: results }));
+    if (JSON.stringify(next.results) !== JSON.stringify(t.results)) {
+      hist.current.past.push(t.results);
+      if (hist.current.past.length > 80) hist.current.past.shift();
+      hist.current.future = [];
+    }
+    patch({ tournament: next });
+  };
+  const undo = () => {
+    const h = hist.current;
+    if (!h.past.length) return;
+    const prev = h.past.pop();
+    h.future.push(t.results);
+    patch({ tournament: Object.assign({}, t, { results: prev }) });
+  };
+  const redo = () => {
+    const h = hist.current;
+    if (!h.future.length) return;
+    const nxt = h.future.pop();
+    h.past.push(t.results);
+    patch({ tournament: Object.assign({}, t, { results: nxt }) });
+  };
+  kb.current = (e) => {
+    if (!(e.ctrlKey || e.metaKey) || open || sched || img || prn) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const k = (e.key || '').toLowerCase();
+    if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+    else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+  };
+  const canUndo = hist.current.past.length > 0;
+  const canRedo = hist.current.future.length > 0;
   const saveResult = (m, res) => {
     if (fb) setResults(Object.assign({}, t.results, { [m.key]: { a: m.a, b: m.b, goals: res.goals, pen: res.pen || null } }));
     else {
@@ -842,7 +910,7 @@ function Tournament({ data, patch, go }) {
     window.open(window.location.href.split('#')[0] + '#standings', 'ranking-standings', 'popup,width=1280,height=720');
   };
   const reset = () => {
-    if (window.confirm(tr('Delete all results and start this tournament again?'))) patch({ tournament: Object.assign({}, t, { results: {} }) });
+    if (window.confirm(tr('Delete all results and start this tournament again?'))) setResults({});
   };
   const sub = t.format === 'groups' ? tr('{g} groups, then playoffs. Click a match to enter its result.', { g: t.cfg.G }) : tr('Click a match to enter its result. Choose 3 or 5 sets for each match.');
   const subFb = t.format === 'groups' ? tr('{g} groups, then playoffs. Click a match to enter its score.', { g: t.cfg.G }) : tr('Click a match to enter its score. Level knockout games need a penalty shootout.');
@@ -852,6 +920,12 @@ function Tournament({ data, patch, go }) {
       <div className="panel" style={{ left: 64, top: 164, width: 1312, height: 606, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ flex: 'none', height: 48, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button type="button" className="ghost soft" onClick={undo} disabled={!canUndo} aria-label={tr('Undo')} title={tr('Undo') + ' (Ctrl+Z)'} style={{ width: 44, padding: 0, justifyContent: 'center', opacity: canUndo ? 1 : 0.4 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7L4 12l5 5M4 12h10a6 6 0 010 12" transform="translate(0 -4)" stroke={NAVY} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
+            <button type="button" className="ghost soft" onClick={redo} disabled={!canRedo} aria-label={tr('Redo')} title={tr('Redo') + ' (Ctrl+Y)'} style={{ width: 44, padding: 0, justifyContent: 'center', opacity: canRedo ? 1 : 0.4 }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7l5 5-5 5M20 12H10a6 6 0 000 12" transform="translate(0 -4)" stroke={NAVY} strokeWidth="2.4" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </button>
             <span className="tag">{played === 1 ? tr('{n} result entered', { n: played }) : tr('{n} results entered', { n: played })}</span>
             {fb ? <span className="tag">{t.format === 'single' ? tr('Penalties if level') : tr('Draws allowed in groups')}</span> : <span className="tag">{tr('3 or 5 sets per match')}</span>}
             {b.champion !== null && b.champion !== undefined ? (
@@ -864,13 +938,18 @@ function Tournament({ data, patch, go }) {
           <div style={{ display: 'flex', gap: 10 }}>
             <button type="button" className="ghost soft" onClick={() => setSched(true)}>{tr('Match schedule')}</button>
             <div style={{ position: 'relative' }}>
-              <button type="button" className="ghost soft" aria-haspopup="menu" aria-expanded={menu} disabled={!!exp} onClick={() => setMenu(!menu)}>{exp ? tr('Making the image…') : tr('Save image')}</button>
+              <button type="button" className="ghost soft" aria-haspopup="menu" aria-expanded={menu} disabled={!!exp} onClick={() => setMenu(!menu)}>{exp ? tr('Making the image…') : tr('Save image / Print')}</button>
               {menu ? (
                 <>
                   <div onClick={() => setMenu(false)} style={{ position: 'fixed', left: -2000, top: -2000, width: 6000, height: 6000, zIndex: 3 }} />
-                  <div role="menu" style={{ position: 'absolute', right: 0, top: 50, zIndex: 4, minWidth: 220, padding: 6, background: '#FFFFFF', border: '1.5px solid ' + NAVY, borderRadius: 16, boxShadow: '0 12px 30px rgba(15,47,140,0.25)' }}>
-                    {[['bracket', tr('Bracket')]].concat(b.tables ? [['standings', tr('Standings')]] : []).concat([['schedule', tr('Match schedule')]]).map((o) => (
-                      <button key={o[0]} type="button" role="menuitem" onClick={() => { setMenu(false); if (o[0] === 'schedule' && !Object.keys(t.schedule || {}).length) setSched(true); else setExp(o[0]); }} style={{ display: 'block', width: '100%', height: 42, padding: '0 14px', textAlign: 'left', background: 'transparent', border: 0, borderRadius: 10, fontSize: 15, fontWeight: 700, color: NAVY, cursor: 'pointer' }}>{o[1]}</button>
+                  <div role="menu" style={{ position: 'absolute', right: 0, top: 50, zIndex: 4, minWidth: 240, padding: 6, background: '#FFFFFF', border: '1.5px solid ' + NAVY, borderRadius: 16, boxShadow: '0 12px 30px rgba(15,47,140,0.25)' }}>
+                    {[['img', tr('Save image')], ['print', tr('Print')]].map((sec) => (
+                      <div key={sec[0]}>
+                        <div style={{ padding: '8px 14px 2px', fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: '#3F5688' }}>{sec[1]}</div>
+                        {[['bracket', tr('Bracket')]].concat(b.tables ? [['standings', tr('Standings')]] : []).concat([['schedule', tr('Match schedule')]]).map((o) => (
+                          <button key={o[0]} type="button" role="menuitem" onClick={() => { setMenu(false); if (o[0] === 'schedule' && !Object.keys(t.schedule || {}).length) setSched(true); else if (sec[0] === 'img') setExp(o[0]); else setPrn(o[0]); }} style={{ display: 'block', width: '100%', height: 40, padding: '0 14px', textAlign: 'left', background: 'transparent', border: 0, borderRadius: 10, fontSize: 15, fontWeight: 700, color: NAVY, cursor: 'pointer' }}>{o[1]}</button>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 </>
@@ -887,8 +966,9 @@ function Tournament({ data, patch, go }) {
         </div>
         <Bracket columns={b.columns} names={tnames} onOpen={(m) => setOpen(m)} justify={koLike ? 'center' : 'space-between'} colGap={koLike ? 120 : t.format === 'swiss' ? 44 : 24} />
       </div>
-      {sched ? <ScheduleModal list={listMatches(b.columns)} names={tnames} schedule={t.schedule || {}} onChange={(sc) => patch({ tournament: Object.assign({}, t, { schedule: sc }) })} onSaveImage={() => { setSched(false); setExp('schedule'); }} onClose={() => setSched(false)} /> : null}
+      {sched ? <ScheduleModal list={listMatches(b.columns)} names={tnames} schedule={t.schedule || {}} onChange={(sc) => patch({ tournament: Object.assign({}, t, { schedule: sc }) })} onSaveImage={() => { setSched(false); setExp('schedule'); }} onPrint={() => { setSched(false); setPrn('schedule'); }} onClose={() => setSched(false)} /> : null}
       {exp ? <ExportRunner key={exp} kind={exp} b={b} names={tnames} sport={sport} title={title} schedule={t.schedule || {}} bracketProps={{ justify: koLike ? 'center' : 'space-between', colGap: koLike ? 120 : t.format === 'swiss' ? 44 : 24 }} onDone={(url) => { setImg({ url: url, name: 'ranking-' + exp + '-' + new Date().toISOString().slice(0, 10) + '.png' }); setExp(null); }} onFail={() => { setExp(null); window.alert(tr('Could not create the image.')); }} /> : null}
+      {prn ? <PrintRunner key={prn} kind={prn} b={b} names={tnames} sport={sport} title={title} schedule={t.schedule || {}} bracketProps={{ justify: koLike ? 'center' : 'space-between', colGap: koLike ? 120 : t.format === 'swiss' ? 44 : 24 }} onDone={() => setPrn(null)} /> : null}
       {img ? <ImagePreview url={img.url} name={img.name} onSave={() => import('./exporter.js').then((m) => m.saveImage(img.url, img.name))} onClose={() => setImg(null)} /> : null}
       {open ? <ScoreModal key={open.key} sport={sport} match={open} names={tnames} defaultBo={data.bo} onSave={(res) => saveResult(open, res)} onClear={() => clearResult(open)} onClose={() => setOpen(null)} /> : null}
     </>

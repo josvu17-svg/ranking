@@ -1,6 +1,7 @@
 // Turns a piece of the page into a PNG. Loaded only when someone saves an image.
 // The fonts are put into the picture as data so it looks the same on every device, offline too.
 import { toPng } from 'html-to-image';
+import { saveBlob } from './files.js';
 import l500 from '@fontsource/montserrat/files/montserrat-latin-500-normal.woff2?inline';
 import l600 from '@fontsource/montserrat/files/montserrat-latin-600-normal.woff2?inline';
 import l700 from '@fontsource/montserrat/files/montserrat-latin-700-normal.woff2?inline';
@@ -40,18 +41,5 @@ export async function renderPng(node) {
 
 export async function saveImage(url, name) {
   const blob = await (await fetch(url)).blob();
-  const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
-  if (coarse && navigator.canShare && typeof File === 'function') {
-    const file = new File([blob], name, { type: 'image/png' });
-    if (navigator.canShare({ files: [file] })) {
-      try { await navigator.share({ files: [file] }); return; } catch (e) { if (e && e.name === 'AbortError') return; }
-    }
-  }
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 20000);
+  return saveBlob(blob, name);
 }

@@ -35,3 +35,12 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid 
 @keyframes tabin { from { width: 0; opacity: 0; } to { opacity: 1; } }
 
 html, body { touch-action: manipulation; -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
+
+/* Printing: only the sheet in #print-root is printed, not the app. */
+#print-root { position: fixed; left: -40000px; top: 0; width: 6000px; }
+@media print {
+  html, body { height: auto !important; overflow: visible !important; background: #FFFFFF !important; }
+  body > *:not(#print-root):not(style):not(script) { display: none !important; }
+  #print-root { position: static !important; width: auto !important; display: block !important; }
+  #print-root, #print-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
